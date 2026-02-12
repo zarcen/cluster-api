@@ -695,11 +695,18 @@ func (r *KubeadmConfigReconciler) joinWorker(ctx context.Context, scope *Scope) 
 	}
 
 	// TODO(weichen): revisit the worker join code for kubadm join config
-	kubernetesVersion := scope.ConfigOwner.KubernetesVersion()
+	// Use the cluster version for choosing the kubeadm API version to match the kubeadm binary.
+	kubernetesVersion := scope.Cluster.Spec.Topology.Version
+	if kubernetesVersion == "" {
+		// If the cluster version is not set, fall back to the machine version.
+		kubernetesVersion = scope.ConfigOwner.KubernetesVersion()
+	}
 	parsedVersion, err := semver.ParseTolerant(kubernetesVersion)
 	if err != nil {
 		return ctrl.Result{}, errors.Wrapf(err, "failed to parse kubernetes version %q", kubernetesVersion)
 	}
+
+	scope.Info("kubernetes version expect to use for kubeadm join", "version", kubernetesVersion)
 
 	// Add the node uninitialized taint to the list of taints.
 	// DeepCopy the JoinConfiguration to prevent updating the actual KubeadmConfig.
@@ -871,6 +878,7 @@ func (r *KubeadmConfigReconciler) joinControlplane(ctx context.Context, scope *S
 		return res, nil
 	}
 
+	// TODO(weichen): should 2nd and other control planes use the machine's version or the downloaded k8s version?
 	kubernetesVersion := scope.ConfigOwner.KubernetesVersion()
 	parsedVersion, err := semver.ParseTolerant(kubernetesVersion)
 	if err != nil {
