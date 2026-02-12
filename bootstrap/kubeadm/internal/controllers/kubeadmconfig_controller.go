@@ -520,6 +520,14 @@ func (r *KubeadmConfigReconciler) handleClusterNotInitialized(ctx context.Contex
 	}
 
 	initdata, err := kubeadmtypes.MarshalInitConfigurationForVersion(&scope.Config.Spec.InitConfiguration, parsedVersion)
+	// parsedVersion -> 1.35.0, the acutal kubeadm version is 1.34.5
+	/*
+		mgmt cluster -> cloud-init -> /bin/kubeadm-bootstrap.sh -> target machine to execute
+
+		/bin/kubeadm-bootstrap.sh
+			-> /bin/kubeadm join --config /etc/kubeadm/join.yaml
+			Cody's work -> replace the script -> replace '/bin/kubeadm' with '/tmp/kubeadm' -> such that the /tmp/kubeadm is the version controller likes
+	*/
 	if err != nil {
 		scope.Error(err, "Failed to marshal init configuration")
 		return ctrl.Result{}, err
@@ -686,6 +694,7 @@ func (r *KubeadmConfigReconciler) joinWorker(ctx context.Context, scope *Scope) 
 		return res, nil
 	}
 
+	// TODO(weichen): revisit the worker join code for kubadm join config
 	kubernetesVersion := scope.ConfigOwner.KubernetesVersion()
 	parsedVersion, err := semver.ParseTolerant(kubernetesVersion)
 	if err != nil {
@@ -703,6 +712,7 @@ func (r *KubeadmConfigReconciler) joinWorker(ctx context.Context, scope *Scope) 
 
 	// NOTE: It is not required to provide in input ClusterConfiguration because only clusterConfiguration.APIServer.TimeoutForControlPlane
 	// has been migrated to JoinConfiguration in the kubeadm v1beta4 API version, and this field does not apply to workers.
+	// TODO(weichen): revisit the worker join code for kubadm join config
 	joinData, err := kubeadmtypes.MarshalJoinConfigurationForVersion(joinConfiguration, parsedVersion)
 	if err != nil {
 		scope.Error(err, "Failed to marshal join configuration")

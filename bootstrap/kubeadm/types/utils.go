@@ -73,6 +73,7 @@ func KubeVersionToKubeadmAPIGroupVersion(v semver.Version) (schema.GroupVersion,
 // MarshalClusterConfigurationForVersion converts a Cluster API ClusterConfiguration type to the kubeadm API type
 // for the given Kubernetes Version.
 // NOTE: This assumes Kubernetes Version equals to kubeadm version.
+// TODO(weichen): we will break the assumption that ver(kubelet) == ver(kubeadm)
 func MarshalClusterConfigurationForVersion(clusterConfiguration *bootstrapv1.ClusterConfiguration, version semver.Version, data *upstream.AdditionalData) (string, error) {
 	hub := &upstreamhub.ClusterConfiguration{}
 	if clusterConfiguration != nil {
