@@ -27,6 +27,7 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	bootstrapapi "k8s.io/cluster-bootstrap/token/api"
 	utilfeature "k8s.io/component-base/featuregate/testing"
@@ -804,6 +805,7 @@ func TestBootstrapDataFormat(t *testing.T) {
 		isWorker           bool
 		format             bootstrapv1.Format
 		clusterInitialized bool
+		withClusterClass   bool
 	}{
 		{
 			name:   "cloud-config init config",
@@ -828,6 +830,13 @@ func TestBootstrapDataFormat(t *testing.T) {
 			name:   "Empty format field",
 			format: bootstrapv1.CloudConfig,
 		},
+		{
+			name:               "cloudinit worker with clusterclass",
+			isWorker:           true,
+			format:             bootstrapv1.CloudConfig,
+			clusterInitialized: true,
+			withClusterClass:   true,
+		},
 	}
 
 	for _, tc := range testcases {
@@ -835,6 +844,17 @@ func TestBootstrapDataFormat(t *testing.T) {
 			g := NewWithT(t)
 
 			cluster := builder.Cluster(metav1.NamespaceDefault, "cluster").Build()
+			clusterClass := builder.ClusterClass(metav1.NamespaceDefault, "cluster-class").
+				WithControlPlaneInfrastructureMachineTemplate(&unstructured.Unstructured{}).
+				Build()
+			topology := builder.ClusterTopology().
+				WithClass(clusterClass.Name).
+				WithClassNamespace(clusterClass.Namespace).
+				WithVersion("v1.24.0"). // intentionally use a different version from configOwner
+				Build()
+			if tc.withClusterClass {
+				cluster.Spec.Topology = *topology
+			}
 			cluster.Status.Initialization.InfrastructureProvisioned = ptr.To(true)
 			cluster.Spec.ControlPlaneEndpoint = clusterv1.APIEndpoint{Host: "100.105.150.1", Port: 6443}
 			if tc.clusterInitialized {
