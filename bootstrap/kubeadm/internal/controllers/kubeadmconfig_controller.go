@@ -19,6 +19,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strconv"
 	"time"
 
@@ -28,7 +29,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	clientcmdv1 "k8s.io/client-go/tools/clientcmd/api/v1"
@@ -694,12 +697,45 @@ func (r *KubeadmConfigReconciler) joinWorker(ctx context.Context, scope *Scope) 
 		return res, nil
 	}
 
-	// TODO(weichen): revisit the worker join code for kubadm join config
-	// Use the cluster version for choosing the kubeadm API version to match the kubeadm binary.
-	kubernetesVersion := scope.Cluster.Spec.Topology.Version
-	if kubernetesVersion == "" {
-		// If the cluster version is not set, fall back to the machine version.
-		kubernetesVersion = scope.ConfigOwner.KubernetesVersion()
+	// TODO(weichen): Assume the joining node will always prepare the same kubeadm binary version to match the current controlplane version.
+	//                Then, simply marshall it into the kubeadmConfig object.
+	// If the cluster is managed topologies supported, use the cluster version for choosing the kubeadm API version to match the kubeadm binary.
+
+	/*
+		-> Cluster (CP 1.34 + Worker1 1.34 + Worker2 1.34)
+		-> Upgrade is triggered to 1.35
+		==== If no indenpendent worker is supported ===
+			-> Cluster (CP 1.35 + Worker1 1.35 + Worker2 1.35)
+		==== With independant worker ===
+			-> Cluster (CP 1.35 + Worker1(stay) 1.34 + Worker2(allow-upgrade) 1.35)
+			-> Whan a node in Worker1 is replaced/scaled, it needs to join the CP of 1.35
+			-> This node will use KubeadmAPIGroup(1.34) to join the CP's KubeadmAPIGroup(1.35) -> And, it will fail
+	*/
+	kubernetesVersion := scope.ConfigOwner.KubernetesVersion()
+	if !reflect.DeepEqual(scope.Cluster.Spec.Topology, clusterv1.Topology{}) && scope.Cluster.Spec.Topology.Version != "" {
+		kubernetesVersion = scope.Cluster.Spec.Topology.Version
+	} else {
+		// if the cluster does not have managed topologies, fetch the controlplane via GTK
+		kind := scope.Cluster.Spec.ControlPlaneRef.Kind
+		group := scope.Cluster.Spec.ControlPlaneRef.APIGroup
+		cp := &unstructured.Unstructured{}
+		cp.SetGroupVersionKind(schema.GroupVersionKind{
+			Group: group,
+			Kind:  kind,
+		})
+		err := r.Client.Get(ctx, client.ObjectKey{Namespace: scope.Cluster.Namespace, Name: scope.Cluster.Spec.ControlPlaneRef.Name}, cp)
+		if err != nil {
+			scope.Error(err, "failed to get controlplane object for fetching kubernetes version")
+			// in this case, juust use the conifgOwner (Machine) kubernetes version
+		}
+		// TODO(weichen): What if the CP ResourceRef doesn't have .spec.version? What should we do?
+		fields := []string{"spec", "version"}
+		version, _, err := unstructured.NestedString(cp.Object, fields...)
+		if err != nil {
+			scope.Error(err, "failed to get kubernetes version from controlplane object")
+		} else {
+			kubernetesVersion = version
+		}
 	}
 	parsedVersion, err := semver.ParseTolerant(kubernetesVersion)
 	if err != nil {
